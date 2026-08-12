@@ -16,7 +16,7 @@ def descubrir_servidor():
     socket_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     socket_udp.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
     socket_udp.settimeout(RECEIVE_TIMEOUT)
-    socket_udp.bind(("", 2026))
+    socket_udp.bind(("", 0))  # Asigna cualquier puerto libre disponible
 
     try:
         for _ in range(MAX_ATTEMPTS):
