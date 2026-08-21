@@ -43,7 +43,7 @@ def handle_client(client_socket, client_address):
                 if not message:
                     continue
 
-                print(f"Recibido de {client_address}: {message}")
+                # print(f"Recibido de {client_address}: {message}")
 
                 if message.startswith("METRIC "):
                     if registered:
@@ -51,6 +51,13 @@ def handle_client(client_socket, client_address):
                         if len(parts) == 3:
                             print(f"Métrica recibida de {client_address}: {parts[1]} {parts[2]}")
                     continue
+
+                if message.startswith("ALERT "):
+                    if registered:
+                        parts = message.split(" ", 2)
+                        if len(parts) == 3:
+                            print(f"Alerta recibida de {client_address}: {parts[1]} {parts[2]}")
+                    continue                    
 
                 if message == "END":
                     if registered:
@@ -97,7 +104,7 @@ def main():
 
     discovery_thread = threading.Thread(
         target=handle_discover,
-        args=(socket_udp, TCP_PORT, 80, 90),
+        args=(socket_udp, TCP_PORT, 1.5, 30.9),
         daemon=False,
     )
     discovery_thread.start()

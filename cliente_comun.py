@@ -36,8 +36,8 @@ def descubrir_servidor():
             if len(parts) != 4 or parts[0] != "SERVER":
                 continue
 
-            umbral_cpu = int(parts[1])
-            umbral_mem = int(parts[2])
+            umbral_cpu = float(parts[1])
+            umbral_mem = float(parts[2])
             tcp_port = int(parts[3])
 
             return server_address[0], tcp_port, umbral_cpu, umbral_mem
@@ -84,10 +84,46 @@ def enviar_metricas_periodicamente(socket_tcp, umbral_cpu, umbral_mem, detener):
         mensaje = f"METRIC MEM {memory_percent}\n"
         socket_tcp.sendall(mensaje.encode("utf-8"))
 
-        if cpu_percent > umbral_cpu or memory_percent > umbral_mem:
-            print(f"Advertencia: Umbral superado (CPU: {cpu_percent}%, Memoria: {memory_percent}%)")
+        if cpu_percent > umbral_cpu:
+            mensaje = f"ALERT CPU {cpu_percent}\n"
+            socket_tcp.sendall(mensaje.encode("utf-8"))
+
+        if memory_percent > umbral_mem:
+            mensaje = f"ALERT MEM {memory_percent}\n"
+            socket_tcp.sendall(mensaje.encode("utf-8"))
+
+        if cpu_percent > umbral_cpu: 
+            print(f"Advertencia: Umbral superado CPU: {cpu_percent}%")
+
+        if memory_percent > umbral_mem:
+            print(f"Advertencia: Umbral superado Memoria: {memory_percent}%")
 
         detener.wait(3)
+
+def get_proc(socket_tcp, detener):
+    """Responde a GET_PROC con la lista de procesos del agente."""
+    while not detener.is_set():
+        try:
+            solicitud_del_servidor = socket_tcp.recv(1024)
+        except socket.timeout:
+            continue
+        except OSError:
+            return
+
+        if not solicitud_del_servidor:
+            return
+
+        if solicitud_del_servidor.decode("utf-8").strip() == "GET_PROC":
+            procesos = []
+            for proc in psutil.process_iter(["pid", "name"]):
+                try:
+                    procesos.append(f"{proc.info['pid']}:{proc.info['name']}")
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    continue
+
+            respuesta = f"PROC {', '.join(procesos)}\n"
+            socket_tcp.sendall(respuesta.encode("utf-8"))
+            return
 
 
 def main():
@@ -106,6 +142,8 @@ def main():
         registrar_agente(socket_tcp, CLAVE)
         print("Registro confirmado por el servidor")
         detener = threading.Event()
+        proc_thread = threading.Thread(target=get_proc, args=(socket_tcp, detener))
+        proc_thread.start()
         metricas_thread = threading.Thread(
             target=enviar_metricas_periodicamente,
             args=(socket_tcp, umbral_cpu, umbral_mem, detener),
@@ -115,6 +153,7 @@ def main():
         detener.set()
         metricas_thread.join()
         cerrar_registro(socket_tcp)
+        proc_thread.join()
         print("Registro eliminado y conexión cerrada")
     except (TimeoutError, RuntimeError) as exc:
         print(f"Error de registro: {exc}")
