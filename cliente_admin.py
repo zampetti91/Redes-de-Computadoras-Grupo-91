@@ -49,7 +49,7 @@ def descubrir_servidor():
 
 def registrar_agente(socket_tcp, clave):
     """Realiza el registro del agente común en el servidor."""
-    socket_tcp.sendall(f"REGISTER {clave}\n".encode("utf-8"))
+    socket_tcp.sendall(f"ADMIN {clave}\n".encode("utf-8"))
     socket_tcp.settimeout(RECEIVE_TIMEOUT)
 
     try:
@@ -58,7 +58,7 @@ def registrar_agente(socket_tcp, clave):
         raise TimeoutError("No se recibió respuesta de registro del servidor")
 
     respuesta_str = respuesta.decode("utf-8").strip()
-    if respuesta_str != "REG_RESP":
+    if respuesta_str != "ADMIN_RESP":
         raise RuntimeError(f"Respuesta de registro inesperada: {respuesta_str!r}")
 
     return True
@@ -71,58 +71,16 @@ def cerrar_registro(socket_tcp):
     socket_tcp.close()
     return True
 
-def enviar_metricas_periodicamente(socket_tcp, umbral_cpu, umbral_mem, detener):
-    """Envía métricas al servidor cada 3 segundos."""
 
-    while not detener.is_set():
-        cpu_percent = psutil.cpu_percent(interval=None)
-        memory_percent = psutil.virtual_memory().percent
-
-        mensaje = f"METRIC CPU {cpu_percent}\n"
-        socket_tcp.sendall(mensaje.encode("utf-8"))
-
-        mensaje = f"METRIC MEM {memory_percent}\n"
-        socket_tcp.sendall(mensaje.encode("utf-8"))
-
-        if cpu_percent > umbral_cpu:
-            mensaje = f"ALERT CPU {cpu_percent}\n"
-            socket_tcp.sendall(mensaje.encode("utf-8"))
-
-        if memory_percent > umbral_mem:
-            mensaje = f"ALERT MEM {memory_percent}\n"
-            socket_tcp.sendall(mensaje.encode("utf-8"))
-
-        if cpu_percent > umbral_cpu: 
-            print(f"Advertencia: Umbral superado CPU: {cpu_percent}%")
-
-        if memory_percent > umbral_mem:
-            print(f"Advertencia: Umbral superado Memoria: {memory_percent}%")
-
-        detener.wait(3)
-
-def get_proc(socket_tcp, detener):
-    """Responde a GET_PROC con la lista de procesos del agente."""
-    while not detener.is_set():
-        try:
-            solicitud_del_servidor = socket_tcp.recv(1024)
-        except socket.timeout:
-            continue
-        except OSError:
-            return
-
-        if not solicitud_del_servidor:
-            return
-
-        if solicitud_del_servidor.decode("utf-8").strip() == "GET_PROC":
-            procesos = []
-            for proc in psutil.process_iter(["pid", "name"]):
-                try:
-                    procesos.append(f"{proc.info['pid']}:{proc.info['name']}")
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
-
-            respuesta = f"PROC {', '.join(procesos)}\n"
-            socket_tcp.sendall(respuesta.encode("utf-8"))
+def recibir_linea(socket_tcp):
+    """Recibe una respuesta TCP completa, terminada en salto de línea."""
+    respuesta = bytearray()
+    while b"\n" not in respuesta:
+        datos = socket_tcp.recv(4096)
+        if not datos:
+            raise ConnectionError("El servidor cerró la conexión")
+        respuesta.extend(datos)
+    return bytes(respuesta).split(b"\n", 1)[0].decode("utf-8").strip()
 
 
 def main():
@@ -132,7 +90,7 @@ def main():
         return -1
 
     ip_server, port_server, umbral_cpu, umbral_mem = respuesta_servidor
-    print(f"Servidor encontrado en {ip_server}:{port_server} con umbral_cpu={umbral_cpu} y umbral_mem={umbral_mem}")
+    print(f"Servidor encontrado en {ip_server}:{port_server}")
 
     socket_tcp = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     socket_tcp.connect((ip_server, port_server))
@@ -140,19 +98,35 @@ def main():
     try:
         registrar_agente(socket_tcp, CLAVE)
         print("Registro confirmado por el servidor")
-        detener = threading.Event()
-        proc_thread = threading.Thread(target=get_proc, args=(socket_tcp, detener))
-        proc_thread.start()
-        metricas_thread = threading.Thread(
-            target=enviar_metricas_periodicamente,
-            args=(socket_tcp, umbral_cpu, umbral_mem, detener),
-        )
-        metricas_thread.start()
-        time.sleep(60)
-        detener.set()
-        metricas_thread.join()
+        lista = ""
+        while True:
+            comando = input("Comando (L, P <x> o E): ").strip().upper()
+            if comando == "L":
+                socket_tcp.sendall(b"LIST_AGENTS\n")
+                lista = recibir_linea(socket_tcp)
+                print(lista)
+            elif comando.startswith("P "):
+                try:
+                    ordinal = int(comando.split()[1])
+                    agentes = lista.split()[1:]
+                    if ordinal < 1 or ordinal > len(agentes) // 2:
+                        raise ValueError
+                    agent_id = agentes[(ordinal - 1) * 2]
+                except (ValueError, IndexError, UnboundLocalError):
+                    print("Debe indicar un ordinal válido de la lista de agentes")
+                    continue
+
+                socket_tcp.sendall(f"GET_PROC {agent_id}\n".encode("utf-8"))
+                try:
+                    print(recibir_linea(socket_tcp))
+                except socket.timeout:
+                    print("El agente no respondió a la solicitud de procesos")
+            elif comando == "E":
+                break
+            else:
+                print("Comando inválido")
+
         cerrar_registro(socket_tcp)
-        proc_thread.join()
         print("Registro eliminado y conexión cerrada")
     except (TimeoutError, RuntimeError) as exc:
         print(f"Error de registro: {exc}")

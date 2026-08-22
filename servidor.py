@@ -7,7 +7,11 @@ TCP_PORT = 5001
 UDP_PORT = 6091
 SECRET_KEY = "clave1234"
 REGISTERED_AGENTS = set()
-
+NEXT_AGENT_ID = 1
+AGENTS_LOCK = threading.Lock()
+REGISTERED_ADMINS = set()
+AGENT_SOCKETS = {}
+PROC_REQUESTS = {}
 
 def handle_discover(discovery_socket, tcp_port, umbral_cpu, umbral_mem):
     """Responde a los clientes que buscan el servidor por UDP."""
@@ -29,6 +33,8 @@ def handle_client(client_socket, client_address):
     """Maneja la comunicación con un cliente TCP."""
     print(f"Cliente conectado desde {client_address}")
     registered = False
+    admin_registered = False
+    agent_id = None
     buffer = b""
     try:
         while True:
@@ -59,11 +65,60 @@ def handle_client(client_socket, client_address):
                             print(f"Alerta recibida de {client_address}: {parts[1]} {parts[2]}")
                     continue                    
 
+                if message.startswith("PROC "):
+                    if agent_id is not None:
+                        with AGENTS_LOCK:
+                            admin_socket = PROC_REQUESTS.pop(agent_id, None)
+                        if admin_socket is not None:
+                            admin_socket.sendall(f"{message}\n".encode("utf-8"))
+                    continue
+
                 if message == "END":
                     if registered:
-                        REGISTERED_AGENTS.discard(client_address)
-                        print(f"Agente eliminado del registro: {client_address}")
+                        if agent_id is not None:
+                            with AGENTS_LOCK:
+                                REGISTERED_AGENTS.discard((client_address, agent_id))
+                            print(f"Agente {agent_id} eliminado del registro: {client_address}")
+                        elif admin_registered:
+                            REGISTERED_ADMINS.discard(client_address)
+                            print(f"Agente administrador eliminado del registro: {client_address}")
                     return
+
+                if message == "LIST_AGENTS":
+                    if admin_registered:
+                        with AGENTS_LOCK:
+                            agentes = sorted(REGISTERED_AGENTS, key=lambda agente: agente[1])
+                        listado = " ".join(
+                            f"{agent_id} {address[0]}:{address[1]}"
+                            for address, agent_id in agentes
+                        )
+                        client_socket.sendall(f"AGENTS {listado}\n".encode("utf-8"))
+                    else:
+                        client_socket.sendall(b"ERROR\n")
+                    continue
+
+                if message.startswith("GET_PROC "):
+                    partes = message.split(" ", 1)
+                    try:
+                        requested_agent_id = int(partes[1])
+                    except (IndexError, ValueError):
+                        client_socket.sendall(b"ERROR\n")
+                        continue
+
+                    if not admin_registered:
+                        client_socket.sendall(b"ERROR\n")
+                        continue
+
+                    with AGENTS_LOCK:
+                        agent_socket = AGENT_SOCKETS.get(requested_agent_id)
+                        if agent_socket is not None:
+                            PROC_REQUESTS[requested_agent_id] = client_socket
+
+                    if agent_socket is None:
+                        client_socket.sendall(b"ERROR\n")
+                    else:
+                        agent_socket.sendall(b"GET_PROC\n")
+                    continue
 
                 if message.startswith("REGISTER "):
                     partes = message.split(" ", 1)
@@ -74,10 +129,35 @@ def handle_client(client_socket, client_address):
 
                     clave = partes[1]
                     if clave == SECRET_KEY:
-                        REGISTERED_AGENTS.add(client_address)
+                        global NEXT_AGENT_ID
+                        with AGENTS_LOCK:
+                            agent_id = NEXT_AGENT_ID
+                            NEXT_AGENT_ID += 1
+                            REGISTERED_AGENTS.add((client_address, agent_id))
+                            AGENT_SOCKETS[agent_id] = client_socket
                         registered = True
                         client_socket.sendall(b"REG_RESP\n")
-                        print(f"Agente registrado correctamente desde {client_address}")
+                        print(f"Agente {agent_id} registrado correctamente desde {client_address}")
+                        continue
+
+                    client_socket.sendall(b"ERROR\n")
+                    print(f"Registro rechazado para {client_address}: clave incorrecta")
+                    return
+
+                if message.startswith("ADMIN "):
+                    partes = message.split(" ", 1)
+                    if len(partes) != 2 or not partes[1]:
+                        client_socket.sendall(b"ERROR\n")
+                        print(f"Registro inválido para {client_address}: formato incorrecto")
+                        return
+
+                    clave = partes[1]
+                    if clave == SECRET_KEY:
+                        REGISTERED_ADMINS.add(client_address)
+                        registered = True
+                        admin_registered = True
+                        client_socket.sendall(b"ADMIN_RESP\n")
+                        print(f"Agente administrador registrado correctamente desde {client_address}")
                         continue
 
                     client_socket.sendall(b"ERROR\n")
@@ -91,7 +171,13 @@ def handle_client(client_socket, client_address):
         print(f"Conexión con {client_address} cerrada inesperadamente.")
     finally:
         if registered:
-            REGISTERED_AGENTS.discard(client_address)
+            if agent_id is not None:
+                with AGENTS_LOCK:
+                    REGISTERED_AGENTS.discard((client_address, agent_id))
+                    AGENT_SOCKETS.pop(agent_id, None)
+                    PROC_REQUESTS.pop(agent_id, None)
+            elif admin_registered:
+                REGISTERED_ADMINS.discard(client_address)
         client_socket.close()
         print(f"Cliente desconectado desde {client_address}")
 
