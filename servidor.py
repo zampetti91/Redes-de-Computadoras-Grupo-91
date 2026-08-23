@@ -1,17 +1,27 @@
 #!/usr/bin/env python3.8
 
+import logging
 import socket
 import threading
 
 TCP_PORT = 5001
 UDP_PORT = 6091
 SECRET_KEY = "clave1234"
+LOG_FILE = "servidor.log"
 REGISTERED_AGENTS = set()
 NEXT_AGENT_ID = 1
 AGENTS_LOCK = threading.Lock()
 REGISTERED_ADMINS = set()
 AGENT_SOCKETS = {}
 PROC_REQUESTS = {}
+AGENT_METRICS = {}
+
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 def handle_discover(discovery_socket, tcp_port, umbral_cpu, umbral_mem):
     """Responde a los clientes que buscan el servidor por UDP."""
@@ -54,14 +64,26 @@ def handle_client(client_socket, client_address):
                 if message.startswith("METRIC "):
                     if registered:
                         parts = message.split(" ", 2)
-                        if len(parts) == 3:
+                        if len(parts) == 3 and agent_id is not None:
+                            with AGENTS_LOCK:
+                                metricas = AGENT_METRICS.setdefault(agent_id, [])
+                                metricas.append((parts[1], parts[2]))
+                                if len(metricas) > 20:
+                                    metricas.pop(0)
                             print(f"Métrica recibida de {client_address}: {parts[1]} {parts[2]}")
                     continue
 
                 if message.startswith("ALERT "):
                     if registered:
                         parts = message.split(" ", 2)
-                        if len(parts) == 3:
+                        if len(parts) == 3 and agent_id is not None:
+                            logger.info(
+                                "Alerta del agente %s (%s): %s %s",
+                                agent_id,
+                                client_address,
+                                parts[1],
+                                parts[2],
+                            )
                             print(f"Alerta recibida de {client_address}: {parts[1]} {parts[2]}")
                     continue                    
 
@@ -92,9 +114,39 @@ def handle_client(client_socket, client_address):
                             f"{agent_id} {address[0]}:{address[1]}"
                             for address, agent_id in agentes
                         )
-                        client_socket.sendall(f"AGENTS {listado}\n".encode("utf-8"))
+                        client_socket.sendall(
+                            f"AGENTS {len(agentes)} {listado}\n".encode("utf-8")
+                        )
                     else:
                         client_socket.sendall(b"ERROR\n")
+                    continue
+
+                if message.startswith("GET_METRIC "):
+                    partes = message.split()
+                    try:
+                        if len(partes) != 3:
+                            raise ValueError
+                        requested_agent_id = int(partes[1])
+                        metric_name = partes[2]
+                    except (IndexError, ValueError):
+                        client_socket.sendall(b"ERROR\n")
+                        continue
+
+                    if not admin_registered:
+                        client_socket.sendall(b"ERROR\n")
+                        continue
+
+                    with AGENTS_LOCK:
+                        valores = [
+                            value
+                            for name, value in AGENT_METRICS.get(requested_agent_id, [])
+                            if name == metric_name
+                        ]
+                    respuesta = " ".join(
+                        ["MEASUREMENTS", str(requested_agent_id), metric_name, str(len(valores))]
+                        + valores
+                    )
+                    client_socket.sendall(f"{respuesta}\n".encode("utf-8"))
                     continue
 
                 if message.startswith("GET_PROC "):
@@ -135,6 +187,7 @@ def handle_client(client_socket, client_address):
                             NEXT_AGENT_ID += 1
                             REGISTERED_AGENTS.add((client_address, agent_id))
                             AGENT_SOCKETS[agent_id] = client_socket
+                            AGENT_METRICS[agent_id] = []
                         registered = True
                         client_socket.sendall(b"REG_RESP\n")
                         print(f"Agente {agent_id} registrado correctamente desde {client_address}")
@@ -190,7 +243,7 @@ def main():
 
     discovery_thread = threading.Thread(
         target=handle_discover,
-        args=(socket_udp, TCP_PORT, 1.5, 30.9),
+        args=(socket_udp, TCP_PORT, 2.9, 30.1),
         daemon=False,
     )
     discovery_thread.start()

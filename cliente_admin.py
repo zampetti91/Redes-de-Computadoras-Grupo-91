@@ -100,16 +100,21 @@ def main():
         print("Registro confirmado por el servidor")
         lista = ""
         while True:
-            comando = input("Comando (L, P <x> o E): ").strip().upper()
+            comando = input("Comando (L, P <x>, M <x> <metric> o E): ").strip().upper()
             if comando == "L":
                 socket_tcp.sendall(b"LIST_AGENTS\n")
                 lista = recibir_linea(socket_tcp)
                 print(lista)
             elif comando.startswith("P "):
                 try:
+                    if not lista:
+                        socket_tcp.sendall(b"LIST_AGENTS\n")
+                        lista = recibir_linea(socket_tcp)
                     ordinal = int(comando.split()[1])
-                    agentes = lista.split()[1:]
-                    if ordinal < 1 or ordinal > len(agentes) // 2:
+                    partes_lista = lista.split()
+                    cantidad = int(partes_lista[1])
+                    agentes = partes_lista[2:]
+                    if len(agentes) != cantidad * 2 or ordinal < 1 or ordinal > cantidad:
                         raise ValueError
                     agent_id = agentes[(ordinal - 1) * 2]
                 except (ValueError, IndexError, UnboundLocalError):
@@ -121,6 +126,35 @@ def main():
                     print(recibir_linea(socket_tcp))
                 except socket.timeout:
                     print("El agente no respondió a la solicitud de procesos")
+            elif comando.startswith("M "):
+                try:
+                    partes_comando = comando.split()
+                    if len(partes_comando) != 3:
+                        raise ValueError
+                    ordinal = int(partes_comando[1])
+                    metric = partes_comando[2]
+                    if metric not in ("CPU", "MEM"):
+                        raise ValueError
+                    if not lista:
+                        socket_tcp.sendall(b"LIST_AGENTS\n")
+                        lista = recibir_linea(socket_tcp)
+                    partes_lista = lista.split()
+                    cantidad = int(partes_lista[1])
+                    agentes = partes_lista[2:]
+                    if len(agentes) != cantidad * 2 or ordinal < 1 or ordinal > cantidad:
+                        raise ValueError
+                    agent_id = agentes[(ordinal - 1) * 2]
+                except (ValueError, IndexError):
+                    print("Debe indicar un ordinal y una métrica válidos (CPU o MEM)")
+                    continue
+
+                socket_tcp.sendall(
+                    f"GET_METRIC {agent_id} {metric}\n".encode("utf-8")
+                )
+                try:
+                    print(recibir_linea(socket_tcp))
+                except socket.timeout:
+                    print("El servidor no respondió a la solicitud de métricas")
             elif comando == "E":
                 break
             else:
