@@ -12,7 +12,6 @@ MAX_ATTEMPTS = 5
 RECEIVE_TIMEOUT = 10
 CLAVE = "clave1234" 
 
-
 def descubrir_servidor():
     """Busca un servidor mediante broadcast UDP.
 
@@ -46,7 +45,6 @@ def descubrir_servidor():
 
     return None
 
-
 def registrar_agente(socket_tcp, clave):
     """Realiza el registro del agente común en el servidor."""
     socket_tcp.sendall(f"REGISTER {clave}\n".encode("utf-8"))
@@ -62,7 +60,6 @@ def registrar_agente(socket_tcp, clave):
         raise RuntimeError(f"Respuesta de registro inesperada: {respuesta_str!r}")
 
     return True
-
 
 def cerrar_registro(socket_tcp):
     """Elimina el registro del agente y cierra la conexión."""
@@ -124,7 +121,6 @@ def get_proc(socket_tcp, detener):
             respuesta = f"PROC {', '.join(procesos)}\n"
             socket_tcp.sendall(respuesta.encode("utf-8"))
 
-
 def main():
     respuesta_servidor = descubrir_servidor()
     if respuesta_servidor is None:
@@ -165,4 +161,3 @@ def main():
     return 0
 
 main()
-

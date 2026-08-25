@@ -100,25 +100,19 @@ def main():
         print("Registro confirmado por el servidor")
         lista = ""
         while True:
-            comando = input("Comando (L, P <x>, M <x> <metric> o E): ").strip().upper()
+            comando = input("Comando (L, P <idAgente>, M <idAgente> <metric> o E): ").strip().upper()
             if comando == "L":
                 socket_tcp.sendall(b"LIST_AGENTS\n")
                 lista = recibir_linea(socket_tcp)
                 print(lista)
             elif comando.startswith("P "):
                 try:
-                    if not lista:
-                        socket_tcp.sendall(b"LIST_AGENTS\n")
-                        lista = recibir_linea(socket_tcp)
-                    ordinal = int(comando.split()[1])
-                    partes_lista = lista.split()
-                    cantidad = int(partes_lista[1])
-                    agentes = partes_lista[2:]
-                    if len(agentes) != cantidad * 2 or ordinal < 1 or ordinal > cantidad:
+                    partes_comando = comando.split()
+                    if len(partes_comando) != 2:
                         raise ValueError
-                    agent_id = agentes[(ordinal - 1) * 2]
-                except (ValueError, IndexError, UnboundLocalError):
-                    print("Debe indicar un ordinal válido de la lista de agentes")
+                    agent_id = int(partes_comando[1])
+                except (ValueError, IndexError):
+                    print("Debe indicar un idAgente válido")
                     continue
 
                 socket_tcp.sendall(f"GET_PROC {agent_id}\n".encode("utf-8"))
@@ -131,21 +125,12 @@ def main():
                     partes_comando = comando.split()
                     if len(partes_comando) != 3:
                         raise ValueError
-                    ordinal = int(partes_comando[1])
+                    agent_id = int(partes_comando[1])
                     metric = partes_comando[2]
                     if metric not in ("CPU", "MEM"):
                         raise ValueError
-                    if not lista:
-                        socket_tcp.sendall(b"LIST_AGENTS\n")
-                        lista = recibir_linea(socket_tcp)
-                    partes_lista = lista.split()
-                    cantidad = int(partes_lista[1])
-                    agentes = partes_lista[2:]
-                    if len(agentes) != cantidad * 2 or ordinal < 1 or ordinal > cantidad:
-                        raise ValueError
-                    agent_id = agentes[(ordinal - 1) * 2]
                 except (ValueError, IndexError):
-                    print("Debe indicar un ordinal y una métrica válidos (CPU o MEM)")
+                    print("Debe indicar un idAgente y una métrica válidos (CPU o MEM)")
                     continue
 
                 socket_tcp.sendall(

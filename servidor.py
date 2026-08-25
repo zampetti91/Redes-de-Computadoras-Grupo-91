@@ -99,6 +99,9 @@ def handle_client(client_socket, client_address):
                         if agent_id is not None:
                             with AGENTS_LOCK:
                                 REGISTERED_AGENTS.discard((client_address, agent_id))
+                                AGENT_METRICS.pop(agent_id, None)
+                                AGENT_SOCKETS.pop(agent_id, None)
+                                PROC_REQUESTS.pop(agent_id, None)
                             print(f"Agente {agent_id} eliminado del registro: {client_address}")
                         elif admin_registered:
                             REGISTERED_ADMINS.discard(client_address)
@@ -136,6 +139,13 @@ def handle_client(client_socket, client_address):
                         continue
 
                     with AGENTS_LOCK:
+                        agente_registrado = any(
+                            registered_agent_id == requested_agent_id
+                            for _, registered_agent_id in REGISTERED_AGENTS
+                        )
+                        if not agente_registrado:
+                            client_socket.sendall(b"ERROR\n")
+                            continue
                         valores = [
                             value
                             for name, value in AGENT_METRICS.get(requested_agent_id, [])
@@ -228,11 +238,11 @@ def handle_client(client_socket, client_address):
                     REGISTERED_AGENTS.discard((client_address, agent_id))
                     AGENT_SOCKETS.pop(agent_id, None)
                     PROC_REQUESTS.pop(agent_id, None)
+                    AGENT_METRICS.pop(agent_id, None)
             elif admin_registered:
                 REGISTERED_ADMINS.discard(client_address)
         client_socket.close()
         print(f"Cliente desconectado desde {client_address}")
-
 
 def main():
     socket_udp = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
