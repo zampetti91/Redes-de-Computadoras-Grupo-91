@@ -72,7 +72,7 @@ def cerrar_registro(socket_tcp):
     return True
 
 def enviar_metricas_periodicamente(socket_tcp, umbral_cpu, umbral_mem, detener):
-    """Envía métricas al servidor cada 3 segundos."""
+    """Envía métricas al servidor cada 15 segundos."""
 
     while not detener.is_set():
         cpu_percent = psutil.cpu_percent(interval=None)
@@ -98,7 +98,7 @@ def enviar_metricas_periodicamente(socket_tcp, umbral_cpu, umbral_mem, detener):
         if memory_percent > umbral_mem:
             print(f"Advertencia: Umbral superado Memoria: {memory_percent}%")
 
-        detener.wait(3)
+        detener.wait(15)  # Espera 15 segundos o hasta que se establezca el evento de detención
 
 def get_proc(socket_tcp, detener):
     """Responde a GET_PROC con la lista de procesos del agente."""
@@ -148,7 +148,10 @@ def main():
             args=(socket_tcp, umbral_cpu, umbral_mem, detener),
         )
         metricas_thread.start()
-        time.sleep(60)
+        while True:
+            comando = input("Comando (E para salir): ").strip().upper()
+            if comando == "E":
+                break
         detener.set()
         metricas_thread.join()
         cerrar_registro(socket_tcp)
@@ -162,3 +165,4 @@ def main():
     return 0
 
 main()
+

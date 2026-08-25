@@ -38,7 +38,6 @@ def handle_discover(discovery_socket, tcp_port, umbral_cpu, umbral_mem):
             except OSError:
                 break
 
-
 def handle_client(client_socket, client_address):
     """Maneja la comunicación con un cliente TCP."""
     print(f"Cliente conectado desde {client_address}")
