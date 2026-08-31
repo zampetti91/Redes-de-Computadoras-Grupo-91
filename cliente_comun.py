@@ -89,11 +89,11 @@ def enviar_metricas_periodicamente(socket_tcp, umbral_cpu, umbral_mem, detener):
             mensaje = f"ALERT MEM {memory_percent}\n"
             socket_tcp.sendall(mensaje.encode("utf-8"))
 
-        if cpu_percent > umbral_cpu: 
-            print(f"Advertencia: Umbral superado CPU: {cpu_percent}%")
+        #if cpu_percent > umbral_cpu: 
+        #    print(f"Advertencia: Umbral superado CPU: {cpu_percent}%")
 
-        if memory_percent > umbral_mem:
-            print(f"Advertencia: Umbral superado Memoria: {memory_percent}%")
+        #if memory_percent > umbral_mem:
+        #    print(f"Advertencia: Umbral superado Memoria: {memory_percent}%")
 
         detener.wait(15)  # Espera 15 segundos o hasta que se establezca el evento de detención
 
